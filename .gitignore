@@ -4,15 +4,15 @@ __pycache__/
 *$py.class
 
 # Virtual environment
-venv/
 .venv/
+venv/
 ENV/
 env/
 venv.bak
 
-# Data files (we will handle these later with Git LFS if needed)
+# Data files to ignore completely
+# We only want to track the cleaned data and model with Git LFS
 *.csv
-*.parquet
 
 # IDE / Editor specific
 .vscode/
