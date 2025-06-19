@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+.venv/
+ENV/
+env/
+venv.bak
+
+# Data files (we will handle these later with Git LFS if needed)
+*.csv
+*.parquet
+
+# IDE / Editor specific
+.vscode/
+.idea/
