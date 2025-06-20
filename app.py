@@ -1,27 +1,57 @@
-# app.py (Enhanced UI Version)
+# app.py (Final Deployment-Ready Version)
 import streamlit as st
 import pandas as pd
-import ast  # To safely evaluate string representations of lists
+import ast
+import nltk  # Import NLTK
 from engine import clean_user_input, recommend
 
-st.set_page_config(page_title="Pantry-to-Plate", page_icon="🍳", layout="wide")
+
+# --- NLTK Data Download ---
+# This is a one-time setup for the Streamlit server.
+# It checks if the data is present and downloads it if not.
+@st.cache_resource
+def download_nltk_data():
+    try:
+        nltk.data.find('corpora/wordnet.zip')
+    except LookupError:
+        nltk.download('wordnet')
+    try:
+        nltk.data.find('corpora/omw-1.4.zip')
+    except LookupError:
+        nltk.download('omw-1.4')
 
 
+download_nltk_data()
+# --- End of NLTK Setup ---
+
+
+# --- Page Configuration ---
+st.set_page_config(
+    page_title="Pantry-to-Plate",
+    page_icon="🍳",
+    layout="wide"
+)
+
+
+# --- Data Loading ---
 @st.cache_data
 def load_data(path):
+    """Loads the pre-processed recipe data."""
     try:
         df = pd.read_parquet(path)
         return df
     except FileNotFoundError:
-        st.error(f"Data file not found at {path}. Please run the data processing script.")
+        st.error(f"Data file not found at {path}. Please check your GitHub repository.")
         return None
 
 
+# Load the data
 recipes_df = load_data("data/recipes_cleaned.parquet")
 
+# --- UI ---
 st.title("🍳 Pantry-to-Plate")
-st.markdown(
-    "Got a bunch of ingredients and no ideas? I'm here to help! \nEnter the ingredients you have, and I'll suggest some recipes.")
+st.markdown("Got a bunch of ingredients and no ideas? I'm here to help! \n"
+            "Enter the ingredients you have, and I'll suggest some recipes.")
 
 if recipes_df is not None:
     with st.form(key="ingredient_form"):
@@ -38,7 +68,6 @@ if recipes_df is not None:
         if not cleaned_input:
             st.warning("Please enter some valid ingredients.")
         else:
-            # Show the user how their input was parsed after phrase modeling
             parsed_input_str = ", ".join(f"`{item.replace('_', ' ')}`" for item in cleaned_input)
             st.info(f"Searching for recipes with: {parsed_input_str}")
 
@@ -57,7 +86,6 @@ if recipes_df is not None:
                         col1, col2 = st.columns([1, 2])
 
                         with col1:
-                            # --- NEW: DISPLAY THE MATCHED INGREDIENTS ---
                             st.subheader("Ingredients You Have")
                             st.success(", ".join(recipe['matched_ingredients']).replace('_', ' '))
 
@@ -74,7 +102,7 @@ if recipes_df is not None:
                                 for i, step in enumerate(steps, 1):
                                     st.write(f"{i}. {step}")
                             except:
-                                st.write(recipe['steps'])  # Fallback for non-list steps
+                                st.write(recipe['steps'])
             else:
                 st.error("Sorry, I couldn't find any recipes with those ingredients. Try adding a few more!")
 else:
