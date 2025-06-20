@@ -1,15 +1,14 @@
-# engine.py (Upgraded Version)
+# engine.py (Final, Corrected Version)
 import pandas as pd
 from nltk.stem import WordNetLemmatizer
 from nltk.corpus import wordnet
 from gensim.models.phrases import Phraser
+import re
 
 # --- LOAD THE TRAINED PHRASER MODEL ---
-# This ensures user input is processed exactly like the recipe data.
 try:
     phraser = Phraser.load("data/phraser.model")
 except FileNotFoundError:
-    # Set phraser to None if model not found, so app can still run
     phraser = None
 
 lemmatizer = WordNetLemmatizer()
@@ -26,27 +25,43 @@ STOPWORDS = set(
      'uncooked', 'softened', 'melted', 'frozen', 'thawed', 'drained', 'rinsed', 'divided', 'inch', 'inches'])
 
 
-def clean_user_input(text):
-    """Cleans, lemmatizes, AND applies the phrase model to user input."""
+# --- THIS IS THE CORRECTED FUNCTION ---
+def clean_user_input(text: str) -> set:
+    """
+    Correctly cleans user input by processing each comma-separated ingredient individually.
+    """
     if phraser is None:
-        # Handle case where phraser model isn't loaded
         print("Warning: Phraser model not found. Phrase detection will not work.")
 
-    text = text.lower().replace(',', ' ').replace('-', ' ')
-    tokens = text.split()
-    lemmas = [lemmatizer.lemmatize(word, pos=wordnet.NOUN) for word in tokens if word not in STOPWORDS]
+    # Split the user input string into a list of individual ingredients
+    ingredients = text.split(',')
 
-    # --- APPLY THE PHRASER ---
-    if phraser:
-        phrased_input = phraser[lemmas]
-    else:
-        phrased_input = lemmas
+    final_ingredients = set()
 
-    return set(phrased_input)
+    for ing in ingredients:
+        # Apply the same text cleaning as the original processing script
+        cleaned_text = ing.lower()
+        cleaned_text = re.sub(r'\([^)]*\)', '', cleaned_text)
+        cleaned_text = re.sub(r'[^a-z\s]', ' ', cleaned_text)
+        cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
+
+        # Tokenize and lemmatize
+        tokens = cleaned_text.split()
+        lemmas = [lemmatizer.lemmatize(word, pos=wordnet.NOUN) for word in tokens if word not in STOPWORDS]
+
+        # Apply the phraser to the small list of tokens for THIS ingredient
+        if phraser and lemmas:
+            phrased_lemmas = phraser[lemmas]
+            final_ingredients.update(phrased_lemmas)
+        else:
+            final_ingredients.update(lemmas)
+
+    return final_ingredients
 
 
 def recommend(user_ingredients: set, recipes_df: pd.DataFrame, top_n=10):
-    """Recommends recipes and now returns matched ingredients."""
+    """Recommends recipes based on user ingredients."""
+    # This function remains the same as it was already correct
     all_scores = []
     for recipe in recipes_df.itertuples():
         recipe_ingredients = set(recipe.ingredients_cleaned)
@@ -66,7 +81,6 @@ def recommend(user_ingredients: set, recipes_df: pd.DataFrame, top_n=10):
             'score': final_score,
             'matched_count': len(matched_ingredients),
             'missing_count': len(missing_ingredients),
-            # --- NEW: ADD THE LIST OF MATCHED AND MISSING INGREDIENTS ---
             'matched_ingredients': sorted(list(matched_ingredients)),
             'missing_ingredients': sorted(list(missing_ingredients)),
             'ingredients': recipe.ingredients,
