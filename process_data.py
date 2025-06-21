@@ -1,32 +1,32 @@
-# process_data.py (Super App - Final Build, Corrected)
-
+# process_data.py (Final Intelligent & Memory-Optimized Version - Corrected)
 import pandas as pd
+import numpy as np  # Import numpy directly
 import ast
 import re
 import nltk
 from nltk.stem import WordNetLemmatizer
 from nltk.corpus import wordnet
 from gensim.models.phrases import Phrases, Phraser
+from sklearn.feature_extraction.text import TfidfVectorizer
+import json
 from tqdm import tqdm
-import time
 
 # --- Configuration ---
 RAW_RECIPES_PATH = 'data/RAW_recipes.csv'
 RAW_INTERACTIONS_PATH = 'data/RAW_interactions.csv'
-FINAL_DATA_PATH = 'data/recipes_final.parquet'
-PHRASER_MODEL_PATH = 'data/phraser.model'
+FULL_DATA_PATH = 'data/recipes_full_with_idf.parquet'
+HQ_DATA_PATH = 'data/recipes_high_quality.parquet'
 COLLAB_DATA_PATH = 'data/collaborative_filtering_data.parquet'
-
-MIN_RATINGS = 10
-MIN_AVG_RATING = 4.0
-PHRASE_MODEL_MIN_COUNT = 3
-PHRASE_MODEL_SCORING = 'npmi'
+PHRASER_MODEL_PATH = 'data/phraser.model'
+IDF_SCORES_PATH = 'data/idf_scores.json'
+# --- All helper functions and settings remain the same ---
+MIN_RATINGS = 10;
+MIN_AVG_RATING = 4.0;
+PHRASE_MODEL_MIN_COUNT = 3;
+PHRASE_MODEL_SCORING = 'npmi';
 PHRASE_MODEL_THRESHOLD = 0.2
 
-print("--- Super App Data Engine: Final Build ---")
 
-
-# (Helper functions remain the same)
 def setup_nltk(): nltk.data.find('corpora/wordnet.zip'); nltk.data.find('corpora/omw-1.4.zip')
 
 
@@ -53,68 +53,98 @@ def tokenize_and_lemmatize(text): tokens = text.split(); lemmas = [lemmatizer.le
                                                                    in tokens if word not in STOPWORDS]; return lemmas
 
 
+# --- The crucial Memory Optimization Function ---
+def optimize_memory(df, df_name=""):
+    start_mem = df.memory_usage().sum() / 1024 ** 2;
+    print(f'Optimizing {df_name}... Initial memory usage: {start_mem:.2f} MB')
+    for col in df.columns:
+        col_type = df[col].dtype
+        if col_type != object and col_type.name != 'category':
+            c_min = df[col].min();
+            c_max = df[col].max()
+            if str(col_type)[:3] == 'int':
+                if c_min > np.iinfo(np.int8).min and c_max < np.iinfo(np.int8).max:
+                    df[col] = df[col].astype(np.int8)
+                elif c_min > np.iinfo(np.int16).min and c_max < np.iinfo(np.int16).max:
+                    df[col] = df[col].astype(np.int16)
+                elif c_min > np.iinfo(np.int32).min and c_max < np.iinfo(np.int32).max:
+                    df[col] = df[col].astype(np.int32)
+                elif c_min > np.iinfo(np.int64).min and c_max < np.iinfo(np.int64).max:
+                    df[col] = df[col].astype(np.int64)
+            else:
+                if c_min > np.finfo(np.float16).min and c_max < np.finfo(np.float16).max:
+                    df[col] = df[col].astype(np.float16)
+                elif c_min > np.finfo(np.float32).min and c_max < np.finfo(np.float32).max:
+                    df[col] = df[col].astype(np.float32)
+                else:
+                    df[col] = df[col].astype(np.float64)
+    end_mem = df.memory_usage().sum() / 1024 ** 2;
+    print(f'Final memory usage: {end_mem:.2f} MB. Reduced by {100 * (start_mem - end_mem) / start_mem:.1f}%');
+    return df
+
+
 if __name__ == "__main__":
-    setup_nltk()
-
-    print("\n[1/6] Loading raw data...")
-    df_recipes = pd.read_csv(RAW_RECIPES_PATH)
-    df_interactions = pd.read_csv(RAW_INTERACTIONS_PATH)
-
-    print("[2/6] Calculating and filtering for high-quality recipes...")
-    ratings_summary = df_interactions.groupby('recipe_id')['rating'].agg(['mean', 'count']).reset_index()
-    ratings_summary.columns = ['recipe_id', 'avg_rating', 'num_ratings']
-    quality_recipes_ids = ratings_summary[
-        (ratings_summary['num_ratings'] >= MIN_RATINGS) & (ratings_summary['avg_rating'] >= MIN_AVG_RATING)]
-    df_recipes.rename(columns={'id': 'recipe_id'}, inplace=True)
-    df_hq = pd.merge(df_recipes, quality_recipes_ids, on='recipe_id', how='inner')
-
-    print("[3/6] Processing ingredients for phrase modeling...")
-    df_hq['ingredients_parsed'] = df_hq['ingredients'].apply(ast.literal_eval)
-
-    master_ingredient_list = []
-    for recipe_ingredients in tqdm(df_hq['ingredients_parsed'], desc="     - Compiling master list"):
-        for ingredient_text in recipe_ingredients:
-            tokens = tokenize_and_lemmatize(clean_ingredient_text(ingredient_text))
-            if tokens:
-                master_ingredient_list.append(tokens)
-
-    print("[4/6] Training phrase model...")
+    setup_nltk();
+    print("\n--- Final Intelligent & Memory-Optimized Data Build ---")
+    print("[1/5] Loading all recipes and training phrase model...");
+    df_recipes = pd.read_csv(RAW_RECIPES_PATH);
+    df_recipes.rename(columns={'id': 'recipe_id'}, inplace=True);
+    df_recipes['ingredients_parsed'] = df_recipes['ingredients'].apply(ast.literal_eval)
+    master_ingredient_list = [token for recipe_ingredients in
+                              tqdm(df_recipes['ingredients_parsed'], desc="     - Compiling master list") for
+                              ingredient_text in recipe_ingredients for token in
+                              tokenize_and_lemmatize(clean_ingredient_text(ingredient_text))]
     phrases = Phrases(master_ingredient_list, min_count=PHRASE_MODEL_MIN_COUNT, threshold=PHRASE_MODEL_THRESHOLD,
-                      scoring=PHRASE_MODEL_SCORING, delimiter='_')
-    phraser = Phraser(phrases)
+                      scoring=PHRASE_MODEL_SCORING, delimiter='_');
+    phraser = Phraser(phrases);
     phraser.save(PHRASER_MODEL_PATH)
+    print("[2/5] Applying phraser and calculating TF-IDF scores...")
 
 
-    def apply_phraser_to_recipe(ingredient_list):
-        cleaned_set = set()
-        for text in ingredient_list:
-            tokens = tokenize_and_lemmatize(clean_ingredient_text(text))
-            if tokens: cleaned_set.update(phraser[tokens])
-        return sorted(list(cleaned_set))
+    def apply_phraser_to_recipe(ingredient_list): cleaned_set = set(); [cleaned_set.update(phraser[tokens]) for text in
+                                                                        ingredient_list if (
+                                                                            tokens := tokenize_and_lemmatize(
+                                                                                clean_ingredient_text(
+                                                                                    text)))]; return sorted(
+        list(cleaned_set))
 
+
+    tqdm.pandas(desc="     - Applying phraser");
+    df_recipes['ingredients_cleaned'] = df_recipes['ingredients_parsed'].progress_apply(apply_phraser_to_recipe)
+    vectorizer = TfidfVectorizer(tokenizer=lambda x: x, preprocessor=lambda x: x);
+    tfidf_matrix = vectorizer.fit_transform(df_recipes['ingredients_cleaned'])
+    idf_scores = dict(zip(vectorizer.get_feature_names_out(), vectorizer.idf_));
+    with open(IDF_SCORES_PATH, 'w') as f: json.dump(idf_scores, f)
+    print("[3/5] Creating full and high-quality datasets...")
+    df_interactions = pd.read_csv(RAW_INTERACTIONS_PATH);
+    ratings_summary = df_interactions.groupby('recipe_id')['rating'].agg(['mean', 'count']).reset_index();
+    ratings_summary.columns = ['recipe_id', 'avg_rating', 'num_ratings']
 
     # --- THIS IS THE FIX ---
-    tqdm.pandas(desc="     - Applying new phraser to all recipes")
-    df_hq['ingredients_cleaned'] = df_hq['ingredients_parsed'].progress_apply(apply_phraser_to_recipe)
+    # Merge first, THEN fill missing values only in specific columns.
+    df_full = pd.merge(df_recipes, ratings_summary, on='recipe_id', how='left')
+    df_full[['avg_rating', 'num_ratings']] = df_full[['avg_rating', 'num_ratings']].fillna(0)
 
-    print("[5/6] Pre-calculating discovery data...")
-    user_rating_counts = df_interactions['user_id'].value_counts()
+    df_full_final = df_full.rename(columns={'name': 'title'})[
+        ['recipe_id', 'title', 'minutes', 'tags', 'steps', 'ingredients', 'ingredients_cleaned', 'avg_rating',
+         'num_ratings']].copy()
+    df_hq = df_full[(df_full['num_ratings'] >= MIN_RATINGS) & (df_full['avg_rating'] >= MIN_AVG_RATING)]
+    df_hq_final = df_hq.rename(columns={'name': 'title'})[
+        ['recipe_id', 'title', 'minutes', 'tags', 'steps', 'ingredients', 'ingredients_cleaned', 'avg_rating',
+         'num_ratings']].copy()
+    print("[4/5] Pre-calculating discovery data...");
+    user_rating_counts = df_interactions['user_id'].value_counts();
     active_users = user_rating_counts[user_rating_counts >= 5].index
     df_5star = df_interactions[(df_interactions['rating'] == 5) & (df_interactions['user_id'].isin(active_users))]
-    merged = pd.merge(df_5star, df_5star, on='user_id')
+    merged = pd.merge(df_5star, df_5star, on='user_id');
     co_ratings = merged[merged['recipe_id_x'] != merged['recipe_id_y']]
     co_rating_counts = co_ratings.groupby(['recipe_id_x', 'recipe_id_y']).size().reset_index(name='co_rating_count')
     co_rating_counts = co_rating_counts[co_rating_counts['co_rating_count'] >= 2]
-    co_rating_counts.to_parquet(COLLAB_DATA_PATH, index=False)
-    print(f"     ... Saved pre-calculated discovery data to {COLLAB_DATA_PATH}")
-
-    print("[6/6] Finalizing and saving main dataset...")
-    # I have simplified the column selection and renaming for clarity
-    df_final = df_hq.rename(columns={'name': 'title'})
-    final_columns = ['recipe_id', 'title', 'minutes', 'tags', 'steps', 'ingredients', 'ingredients_cleaned',
-                     'avg_rating', 'num_ratings']
-    df_final = df_final[final_columns].copy()
-    df_final['avg_rating'] = df_final['avg_rating'].round(2)
-    df_final.to_parquet(FINAL_DATA_PATH, index=False)
-
-    print("\n--- ✅ SUCCESS! All data for the Super App is built and optimized. ---")
+    print("\n[5/5] Optimizing and saving final data files...")
+    df_full_optimized = optimize_memory(df_full_final, "Full Dataset")
+    df_full_optimized.to_parquet(FULL_DATA_PATH, index=False)
+    df_hq_optimized = optimize_memory(df_hq_final, "High-Quality Dataset")
+    df_hq_optimized.to_parquet(HQ_DATA_PATH, index=False)
+    co_rating_counts_optimized = optimize_memory(co_rating_counts, "Discovery Dataset")
+    co_rating_counts_optimized.to_parquet(COLLAB_DATA_PATH, index=False)
+    print("\n--- ✅ SUCCESS! All intelligent and memory-optimized data is built. ---")
